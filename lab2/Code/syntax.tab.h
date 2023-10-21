@@ -67,8 +67,8 @@ extern int yydebug;
     DIV = 268,                     /* DIV  */
     AND = 269,                     /* AND  */
     OR = 270,                      /* OR  */
-    DOT = 271,                     /* DOT  */
-    NOT = 272,                     /* NOT  */
+    NOT = 271,                     /* NOT  */
+    DOT = 272,                     /* DOT  */
     TYPE = 273,                    /* TYPE  */
     LP = 274,                      /* LP  */
     RP = 275,                      /* RP  */
@@ -81,14 +81,27 @@ extern int yydebug;
     IF = 282,                      /* IF  */
     ELSE = 283,                    /* ELSE  */
     WHILE = 284,                   /* WHILE  */
-    LOWER_THAN_ELSE = 285          /* LOWER_THAN_ELSE  */
+    UMINUS = 285,                  /* UMINUS  */
+    LOWER_THAN_ELSE = 286          /* LOWER_THAN_ELSE  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
 
 /* Value type.  */
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
-typedef int YYSTYPE;
+union YYSTYPE
+{
+#line 72 "./syntax.y"
+
+    int type_int;
+    float type_float;
+    double type_double;
+    struct AST_Node* node;
+
+#line 102 "./syntax.tab.h"
+
+};
+typedef union YYSTYPE YYSTYPE;
 # define YYSTYPE_IS_TRIVIAL 1
 # define YYSTYPE_IS_DECLARED 1
 #endif

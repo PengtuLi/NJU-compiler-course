@@ -1,27 +1,36 @@
 #include <stdio.h>
-#include "Tree.h"
-#include "semantic.h"
-
-extern int yyrestart(FILE* f);
-extern int yyparse();
-extern void printTree(Node* root, int depth);
-extern Node* root;
+#include "syntax.tab.h"
+#include "sem.h"
+extern FILE *yyin;
+extern int yydebug;
 extern int lexError;
-extern int synError;
+extern int synErr;
+extern struct AST_Node *root;
 
-int main(int argc, char** argv) {
+int yylex();
+void func(struct AST_Node *s_node, int h);
+void yyrestart(FILE *f);
+
+int main(int argc, char **argv)
+{
+
     if (argc <= 1)
         return 1;
-    FILE* f = fopen(argv[1], "r");
-    if (!f) {
+    FILE *f = fopen(argv[1], "r");
+    if (!f)
+    {
         perror(argv[1]);
         return 1;
     }
     yyrestart(f);
     yyparse();
-    if (root != NULL && lexError == 0 && synError == 0) {
-        // printTree(root, 0);
-        semantic_analyse(root);
+    if (lexError == 0)
+    {
+        if (synErr == 0)
+        {
+            // func(root,0); // print syntax tree
+            checkStart(root);
+        }
     }
     return 0;
-}
+};

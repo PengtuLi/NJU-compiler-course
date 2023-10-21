@@ -28,7 +28,7 @@ int main(int argc, char **argv)
     {
         if (synErr == 0)
         {
-            //func(root,0);
+            // func(root,0); // print syntax tree
             checkStart(root);
         }
     }

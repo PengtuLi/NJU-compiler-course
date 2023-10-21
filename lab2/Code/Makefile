@@ -18,7 +18,7 @@ LFO = $(LFC:.c=.o)
 YFO = $(YFC:.c=.o)
 
 parser: syntax $(filter-out $(LFO),$(OBJS))
-	$(CC) -o parser $(filter-out $(LFO),$(OBJS)) -lfl -ly
+	$(CC) -o parser $(filter-out $(LFO),$(OBJS)) -lfl
 
 syntax: lexical syntax-c
 	$(CC) -c $(YFC) -o $(YFO)
@@ -31,19 +31,10 @@ syntax-c: $(YFILE)
 
 -include $(patsubst %.o, %.d, $(OBJS))
 
-parser_:
-	flex -o ./lex.yy.c ./lexical.l
-	bison -o ./syntax.tab.c -d -v ./syntax.y
-	gcc -g -c ./syntax.tab.c -o ./syntax.tab.o
-	gcc -std=c99 -g -c -o semantic.o semantic.c
-	gcc -std=c99 -g -c -o Tree.o Tree.c
-	gcc -std=c99 -g -c -o main.o main.c
-	gcc -g -o parser ./semantic.o ./Tree.o ./syntax.tab.o ./main.o -lfl -ly
-
 # 定义的一些伪目标
 .PHONY: clean test
 test:
-	./parser ../Test/self_test.cmm
+	./parser ../Test/test1.cmm
 clean:
 	rm -f parser lex.yy.c syntax.tab.c syntax.tab.h syntax.output
 	rm -f $(OBJS) $(OBJS:.o=.d)

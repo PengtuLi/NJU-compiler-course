@@ -1,11 +1,11 @@
 struct Position
 {
-float x;
+    float x;
 };
 
 struct Position
 {
-int y;
+    int y;
 };
 
 int main()

@@ -1,254 +1,562 @@
-%locations
-%define parse.error verbose
-
 %{
-    #include <stdarg.h>
-    #include "lex.yy.c"
-    Node* root = NULL;
-    Node** package(int childNum, Node* child1, ...);
-    void yyerror(const char* msg);
-    int synError = 0;
+#include "lex.yy.c"
+#include <stdio.h>
+#include <stdarg.h>
+//#define debug_2
+
+extern int yylineno;
+extern struct AST_Node* root;
+int emptyflag=0,mrk_empty=0,synErr=0;
+
+struct AST_Node *bison_init(char* tok,int liner){
+    struct AST_Node * my_node=(struct AST_Node *)malloc(sizeof(struct AST_Node));
+    my_node->child=my_node->next_sib=NULL;
+    strcpy(my_node->name,tok);
+    my_node->height=1;
+    my_node->type=LEX_OTHERS;
+    if(emptyflag||strcmp(tok,"Program")!=0) my_node->lineno=liner;
+    else my_node->lineno=mrk_empty;
+    return my_node;
+}
+//插节点，关于va_list: https://blog.csdn.net/ZKR_HN/article/details/99558135
+void bison_insert(struct AST_Node *top_node,int num_args,...){
+    va_list tmp;
+    va_start(tmp,num_args);
+    top_node->child=va_arg(tmp,struct AST_Node*);
+    struct AST_Node* new_node=top_node->child;
+    for(int i=1;i<num_args;i++){
+        new_node->next_sib=va_arg(tmp,struct AST_Node*);
+        if(new_node->next_sib!=NULL) new_node=new_node->next_sib;
+    }
+}
+//打印树
+
+void func(struct AST_Node* s_node,int h){
+    if(s_node==NULL) return;
+    for(int i=1;i<=h;i++) printf("  ");
+    printf("%s",s_node->name);
+    if(!s_node->height){
+        switch(s_node->type){
+            case(LEX_INT):{
+                printf(": %lld",s_node->is_int);
+                break;
+            }
+            case(LEX_FLOAT):{
+                printf(": %f",s_node->is_float);
+                break;
+            }
+            case(LEX_ID):{
+                printf(": %s",s_node->is_string);
+                break;
+            }
+            case(KEYWORD_TYPE):{
+                printf(": %s",s_node->is_string);
+                break;
+            }
+            default:{}
+        }
+    }else if(s_node->height==1) printf(" (%d)",s_node->lineno);
+    printf("\n");
+    func(s_node->child,h+1);
+    func(s_node->next_sib,h);
+}
+
+
+int yyerror(char*msg){
+    synErr+=1;
+    printf("Error type B at Line %d: %s near %s.\n",yylineno,msg,yytext);
+}
+
 %}
 
-%token INT FLOAT ID SEMI COMMA ASSIGNOP RELOP 
-%token PLUS MINUS STAR DIV AND OR DOT NOT TYPE LP RP LB RB LC RC STRUCT RETURN IF ELSE WHILE
+%union {
+    int type_int;
+    float type_float;
+    double type_double;
+    struct AST_Node* node;
+}
+%locations
 
+%token <node> INT FLOAT ID SEMI COMMA ASSIGNOP RELOP
+%token <node> PLUS MINUS STAR DIV
+%token <node> AND OR NOT DOT
+%token <node> TYPE
+%token <node> LP RP LB RB LC RC
+%token <node> STRUCT RETURN IF ELSE WHILE
+
+%type <node> Program ExtDefList ExtDef ExtDecList
+%type <node> Specifier StructSpecifier OptTag Tag
+%type <node> VarDec FunDec VarList ParamDec
+%type <node> CompSt StmtList Stmt
+%type <node> DefList Def DecList Dec
+%type <node> Exp Args
+
+%start Program
+//优先级8
 %right ASSIGNOP
+//优先级7
 %left OR
+//优先级6
 %left AND
+//优先级5
 %left RELOP
+//优先级4
 %left PLUS MINUS
+//优先级3
 %left STAR DIV
+//优先级2，uminus处理取负
 %right NOT
-%left LP RP LB RB DOT
+%left UMINUS
+//优先级1
+%left DOT LB RB LP RP
 
 %nonassoc LOWER_THAN_ELSE
 %nonassoc ELSE
 
 %%
-/* High-level Definitions */
-Program : ExtDefList                            { $$ = createNode("Program", ENUM_SYN_NOT_NULL, @$.first_line, 
-                                                  1, package(1, $1));
-                                                  root = $$; }
-    ;
-ExtDefList : ExtDef ExtDefList                  { $$ = createNode("ExtDefList", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 2, package(2, $1, $2)); }
-    | /* empty */                               { $$ = createNode("ExtDefList", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL);}
-    ;
-ExtDef : Specifier ExtDecList SEMI              { $$ = createNode("ExtDef", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Specifier SEMI                            { $$ = createNode("ExtDef", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 2, package(2, $1, $2)); }
-    | Specifier FunDec SEMI                     { $$ = createNode("ExtDef", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Specifier FunDec CompSt                   { $$ = createNode("ExtDef", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Specifier error SEMI                      { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | error SEMI                                { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | Specifier error                           { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    ;
-ExtDecList : VarDec                             { $$ = createNode("ExtDecList", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    | VarDec COMMA ExtDecList                   { $$ = createNode("ExtDecList", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | VarDec error COMMA ExtDecList             { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    ;
+Program: ExtDefList {
+    int locline=@$.first_line;
+    $$=bison_init("Program",locline);
+    root=$$;
+    bison_insert($$,1,$1);
+    };
 
-/* Specifiers */
-Specifier : TYPE                                { $$ = createNode("Specifier", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    | StructSpecifier                           { $$ = createNode("Specifier", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    ;
-StructSpecifier : STRUCT OptTag LC DefList RC   { $$ = createNode("StructSpecifier", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 5, package(5, $1, $2, $3, $4, $5)); }
-    | STRUCT Tag                                { $$ = createNode("StructSpecifier", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 2, package(2, $1, $2)); }
-    | STRUCT error LC DefList RC                { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | STRUCT OptTag LC error RC                 { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | STRUCT OptTag LC error                    { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | STRUCT error                              { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    ;
-OptTag : ID                                     { $$ = createNode("OptTag", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    | /* empty */                               { $$ = createNode("OptTag", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); }
-    ;
-Tag : ID                                        { $$ = createNode("Tag", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    ;
+ExtDefList: ExtDef ExtDefList {
+    int locline=@$.first_line;
+    $$=bison_init("ExtDefList",locline);
+    bison_insert($$,2,$1,$2);
+    };
+    | {
+        $$=NULL;
+        mrk_empty=yylineno;
+    };
 
-/* Declarators */
-VarDec : ID                                     { $$ = createNode("VarDec", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    | VarDec LB INT RB                          { $$ = createNode("VarDec", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 4, package(4, $1, $2, $3, $4)); }
-    | VarDec LB error RB                        { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | VarDec LB error                           { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    ;
-FunDec : ID LP VarList RP                       { $$ = createNode("FunDec", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 4, package(4, $1, $2, $3, $4)); }
-    | ID LP RP                                  { $$ = createNode("FunDec", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | ID LP error RP                            { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | ID LP error                               { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    ;
-VarList : ParamDec COMMA VarList                { $$ = createNode("VarList", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | ParamDec                                  { $$ = createNode("VarList", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    ;
-ParamDec : Specifier VarDec                     { $$ = createNode("ParamDec", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 2, package(2, $1, $2)); }
-    ;
+ExtDef:Specifier ExtDecList SEMI{
+    int locline=@$.first_line;
+    $$=bison_init("ExtDef",locline);
+    bison_insert($$,3,$1,$2,$3); 
+    };
+    | Specifier SEMI{
+        int locline=@$.first_line;
+        $$=bison_init("ExtDef",locline);
+        bison_insert($$,2,$1,$2); 
+    };
+    | Specifier FunDec CompSt{
+        int locline=@$.first_line;
+        $$=bison_init("ExtDef",locline);
+        bison_insert($$,3,$1,$2,$3); 
+    };
+     | Specifier FunDec SEMI{
+        int locline=@$.first_line;
+        $$=bison_init("ExtDef",locline);
+        bison_insert($$,3,$1,$2,$3); 
+    };
+    //错误恢复
+    |error SEMI{
+        synErr+=1;
+    };
+    |Specifier error SEMI{
+        synErr+=1;
+    };
+    | error Specifier SEMI{
+        synErr+=1;
+    };
+    | error RP{
+        synErr+=1;
+    };
+    | error RC{
+        synErr+=1;
+    };
+    | error Specifier error CompSt{
+        synErr+=1;
+    };
+    
+ExtDecList: VarDec{
+    int locline=@$.first_line;
+    $$=bison_init("ExtDecList",locline);
+    bison_insert($$,1,$1);
+    };
+    | VarDec COMMA ExtDecList{
+        int locline=@$.first_line;
+        $$=bison_init("ExtDecList",locline);
+        bison_insert($$,3,$1,$2,$3); 
+    };
+    //
+    | VarDec error ExtDefList{
+        synErr+=1;
+    };
 
-/* Statements */
-CompSt : LC DefList StmtList RC                 { $$ = createNode("CompSt", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 4, package(4, $1, $2, $3, $4)); }
-    ;
-StmtList : Stmt StmtList                        { $$ = createNode("StmtList", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 2, package(2, $1, $2)); }
-    | /* empty */                               { $$ = createNode("StmtList", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 0, NULL); }
-    ;
-Stmt : Exp SEMI                                 { $$ = createNode("Stmt", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 2, package(2, $1, $2)); }
-    | CompSt                                    { $$ = createNode("Stmt", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    | RETURN Exp SEMI                           { $$ = createNode("Stmt", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | IF LP Exp RP Stmt %prec LOWER_THAN_ELSE   { $$ = createNode("Stmt", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 5, package(5, $1, $2, $3, $4, $5)); }
-    | IF LP Exp RP Stmt ELSE Stmt               { $$ = createNode("Stmt", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 7, package(7, $1, $2, $3, $4, $5, $6, $7)); }
-    | WHILE LP Exp RP Stmt                      { $$ = createNode("Stmt", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 5, package(5, $1, $2, $3, $4, $5)); }
-    | error SEMI                                { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | IF LP error RP Stmt %prec LOWER_THAN_ELSE { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | IF LP Exp RP error ELSE Stmt              { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | IF LP error RP ELSE Stmt              { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | error LP Exp RP Stmt                      { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    ;
+Specifier: TYPE{
+    int locline=@$.first_line;
+    $$=bison_init("Specifier",locline);
+    bison_insert($$,1,$1);
+    };
+    | StructSpecifier{
+        int locline=@$.first_line;
+        $$=bison_init("Specifier",locline);
+        bison_insert($$,1,$1);
+    };
 
-/* Local Definitions */
-DefList : Def DefList                           { $$ = createNode("DefList", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 2, package(2, $1, $2)); }
-    | /* empty */                               { $$ = createNode("Stmt", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); }
-    ;
-Def : Specifier DecList SEMI                    { $$ = createNode("Def", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    ;
-DecList : Dec                                   { $$ = createNode("DecList", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    | Dec COMMA DecList                         { $$ = createNode("DecList", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Dec error DecList                         { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    ;
-Dec : VarDec                                    { $$ = createNode("Dec", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    | VarDec ASSIGNOP Exp                       { $$ = createNode("Dec", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | error ASSIGNOP Exp                        { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    ;
+StructSpecifier: STRUCT OptTag LC DefList RC{
+    int locline=@$.first_line;
+    $$=bison_init("StructSpecifier",locline);
+    bison_insert($$,5,$1,$2,$3,$4,$5);
+    };
+    | STRUCT Tag{
+        int locline=@$.first_line;
+        $$=bison_init("StructSpecifier",locline);
+        bison_insert($$,2,$1,$2); 
+    };
+    /*
+    | STRUCT error RC{
+        synErr+=1;
+    };
 
-/* Expressions */
-Exp : Exp ASSIGNOP Exp                          { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Exp AND Exp                               { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Exp OR Exp                                { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Exp RELOP Exp                             { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Exp PLUS Exp                              { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Exp MINUS Exp                             { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Exp STAR Exp                              { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Exp DIV Exp                               { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | LP Exp RP                                 { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | MINUS Exp                                 { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 2, package(2, $1, $2)); }
-    | NOT Exp                                   { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 2, package(2, $1, $2)); }
-    | ID LP Args RP                             { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 4, package(4, $1, $2, $3, $4)); }
-    | ID LP RP                                  { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Exp LB Exp RB                             { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 4, package(4, $1, $2, $3, $4)); }
-    | Exp DOT ID                                { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | ID                                        { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    | INT                                       { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    | FLOAT                                     { $$ = createNode("Exp", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    | Exp ASSIGNOP error                        { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | Exp AND error                             { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | Exp OR error                              { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | Exp RELOP error                           { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | Exp PLUS error                            { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | Exp MINUS error                           { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | Exp STAR error                            { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | Exp DIV error                             { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | ID LP error RP                            { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    | Exp LB error RB                           { $$ = createNode("Error", ENUM_SYN_NULL, @$.first_line
-                                                  , 0, NULL); yyerrok; }
-    ;
-Args : Exp COMMA Args                           { $$ = createNode("Args", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 3, package(3, $1, $2, $3)); }
-    | Exp                                       { $$ = createNode("Args", ENUM_SYN_NOT_NULL, @$.first_line
-                                                  , 1, package(1, $1)); }
-    ;
-%%
-Node** package(int childNum, Node* child1, ...) {
-    va_list ap;
-    va_start(ap, child1);
-    Node** res = (Node**)malloc(sizeof(Node*) * childNum);
-    res[0] = child1;
-    for (int i = 1; i < childNum; i++)
-    {
-        res[i] = va_arg(ap, Node*);
+    | error OptTag LC DefList RC{
+        synErr+=1;
+    };
+    */
+
+OptTag:ID{
+    int locline=@$.first_line;
+    $$=bison_init("OptTag",locline);
+    bison_insert($$,1,$1);
+    };
+    | {
+        $$=NULL;
+        //mrk_empty=yylineno;
+    };
+
+Tag:ID{
+    int locline=@$.first_line;
+    $$=bison_init("Tag",locline);
+    bison_insert($$,1,$1);
+    };
+
+VarDec:ID{
+    int locline=@$.first_line;
+    $$=bison_init("VarDec",locline);
+    bison_insert($$,1,$1);
+    };
+    | VarDec LB INT RB{
+        int locline=@$.first_line;
+        $$=bison_init("VarDec",locline);
+        bison_insert($$,4,$1,$2,$3,$4);
+    };
+    //
+    |VarDec LB error RB{
+        synErr+=1;
+    };
+
+FunDec:ID LP VarList RP{
+    int locline=@$.first_line;
+    $$=bison_init("FunDec",locline);
+    bison_insert($$,4,$1,$2,$3,$4);
+    };
+    | ID LP RP{
+        int locline=@$.first_line;
+        $$=bison_init("FunDec",locline);
+        bison_insert($$,3,$1,$2,$3); 
+    };
+    //
+    | ID LP error RP{
+        synErr+=1;
+    };
+    | error LP VarList RP{
+        synErr+=1;
+    };
+    /*
+    | ID error RP{
+        synErr+=1;
+    };
+    */
+    
+
+VarList:ParamDec COMMA VarList{
+    int locline=@$.first_line;
+    $$=bison_init("VarList",locline);
+    bison_insert($$,3,$1,$2,$3); 
+    };
+    | ParamDec{
+        int locline=@$.first_line;
+        $$=bison_init("VarList",locline);
+        bison_insert($$,1,$1);
+    };
+    
+ParamDec:  Specifier VarDec{
+    int locline=@$.first_line;
+    $$=bison_init("ParamDec",locline);
+    bison_insert($$,2,$1,$2);
+    };
+
+CompSt:LC DefList StmtList RC{
+    int locline=@$.first_line;
+    $$=bison_init("CompSt",locline);
+    bison_insert($$,4,$1,$2,$3,$4);
+    };
+    | error RC{
+        synErr+=1;
+    };
+
+
+StmtList:Stmt StmtList{
+    int locline=@$.first_line;
+    $$=bison_init("StmtList",locline);
+    bison_insert($$,2,$1,$2);
+    };
+    | {
+        $$=NULL;
+        //mrk_empty=yylineno;
+    };
+
+Stmt:Exp SEMI{
+    int locline=@$.first_line;
+    $$=bison_init("Stmt",locline);
+    bison_insert($$,2,$1,$2);
+    };        
+    | CompSt{
+        int locline=@$.first_line;
+        $$=bison_init("Stmt",locline);
+        bison_insert($$,1,$1);
+    }; 
+    | RETURN Exp SEMI{
+        int locline=@$.first_line;
+        $$=bison_init("Stmt",locline);
+        bison_insert($$,3,$1,$2,$3);
+    };
+    | IF LP Exp RP Stmt %prec LOWER_THAN_ELSE{
+        int locline=@$.first_line;
+        $$=bison_init("Stmt",locline);
+        bison_insert($$,5,$1,$2,$3,$4,$5);
+    };
+    | IF LP Exp RP Stmt ELSE Stmt{
+        int locline=@$.first_line;
+        $$=bison_init("Stmt",locline);
+        bison_insert($$,7,$1,$2,$3,$4,$5,$6,$7);
+    };
+    | WHILE LP Exp RP Stmt{
+        int locline=@$.first_line;
+        $$=bison_init("Stmt",locline);
+        bison_insert($$,5,$1,$2,$3,$4,$5);
+    };
+    //错误恢复
+    | error SEMI {
+        synErr+=1;
+    };
+    | Exp error SEMI{
+        synErr+=1;
+    };
+    |RETURN Exp error{
+        synErr+=1;
+    };
+    |RETURN error SEMI{
+        synErr+=1;
+    };
+    | IF error ELSE Stmt{
+        synErr+=1;
+    };
+    | WHILE error RP{
+        synErr+=1;
+    };
+    | WHILE error RC{
+        synErr+=1;
+    };
+
+DefList:Def DefList{
+    int locline=@$.first_line;
+    $$=bison_init("DefList",locline);
+    bison_insert($$,2,$1,$2);
+    };
+    | {
+        $$=NULL;
+        //mrk_empty=yylineno;
+    };
+
+Def:Specifier DecList SEMI{
+    int locline=@$.first_line;
+    $$=bison_init("Def",locline);
+    bison_insert($$,3,$1,$2,$3);
+    };
+    //
+    | Specifier error SEMI{
+        synErr+=1;
+    };
+    | Specifier DecList error{
+        synErr+=1;
+    };
+    /*
+    | error DecList SEMI{
+        synErr+=1;
+    };
+    */
+    
+
+DecList:Dec{
+    int locline=@$.first_line;
+    $$=bison_init("DecList",locline);
+    bison_insert($$,1,$1);
+    };
+    | Dec COMMA DecList{;
+        int locline=@$.first_line;
+        $$=bison_init("DecList",locline);
+        bison_insert($$,3,$1,$2,$3);
     }
-    return res;
-}
 
-void yyerror(const char* msg) { 
-    synError++;
-    printf("Error type B at Line %d: %s\n", yylineno, msg);
-}
+Dec:VarDec{
+    int locline=@$.first_line;
+    $$=bison_init("Dec",locline);
+    bison_insert($$,1,$1);
+    };
+    | VarDec ASSIGNOP Exp{
+        int locline=@$.first_line;
+        $$=bison_init("Dec",locline);
+        bison_insert($$,3,$1,$2,$3);
+    };
+
+Exp:Exp ASSIGNOP Exp{
+    int locline=@$.first_line;
+    $$=bison_init("Exp",locline);
+    bison_insert($$,3,$1,$2,$3);
+    };
+    | Exp AND Exp{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,3,$1,$2,$3);
+    };
+    | Exp OR Exp{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,3,$1,$2,$3);
+    };
+    | Exp RELOP Exp{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,3,$1,$2,$3);
+        };
+    | Exp PLUS Exp{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,3,$1,$2,$3);
+        };
+    | Exp MINUS Exp{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,3,$1,$2,$3);
+    };
+    | Exp STAR Exp{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,3,$1,$2,$3);
+    };
+    | Exp DIV Exp{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,3,$1,$2,$3);
+    };
+    | LP Exp RP{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,3,$1,$2,$3);
+    };
+    //取负，区别于minus
+    | MINUS Exp %prec UMINUS{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,2,$1,$2);
+    };
+    | NOT Exp{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,2,$1,$2);
+    };
+    | ID LP Args RP{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,4,$1,$2,$3,$4);
+    };
+    | ID LP RP{
+        int locline=@$.first_line; 
+        $$=bison_init("Exp",locline);
+        bison_insert($$,3,$1,$2,$3);
+    };
+    | Exp LB Exp RB{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,4,$1,$2,$3,$4);
+    };
+    | Exp DOT ID{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,3,$1,$2,$3);
+    };
+    | ID{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,1,$1);
+    };
+    | INT{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,1,$1);
+    };
+    | FLOAT{
+        int locline=@$.first_line;
+        $$=bison_init("Exp",locline);
+        bison_insert($$,1,$1);
+    };
+    //
+    | Exp ASSIGNOP error{
+        synErr+=1;
+    };
+    | Exp AND error{
+        synErr+=1;
+    };
+    | Exp OR error{
+        synErr+=1;
+    };
+    | Exp RELOP error{
+        synErr+=1;
+    };
+    | Exp PLUS error{
+        synErr+=1;
+    };
+    | Exp MINUS error{
+        synErr+=1;
+    };
+    | Exp STAR error{
+        synErr+=1;
+    };
+    | Exp DIV error{
+        synErr+=1;
+    };
+    | LP error RP{
+        synErr+=1;
+    };
+    | MINUS error{
+        synErr+=1;
+    };
+    | NOT error{
+        synErr+=1;
+    };
+    | ID LP error RP{
+        synErr+=1;
+    };
+    | ID LP error SEMI{
+        synErr+=1;
+    };
+    | Exp LB error RB{
+        synErr+=1;
+    };
+        
+Args:Exp COMMA Args{
+    int locline=@$.first_line;
+    $$=bison_init("Args",locline);
+    bison_insert($$,3,$1,$2,$3);
+    };
+    | Exp{
+        int locline=@$.first_line;
+        $$=bison_init("Args",locline);
+        bison_insert($$,1,$1);
+    };
+
+%%
