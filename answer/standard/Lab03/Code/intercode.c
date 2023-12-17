@@ -167,6 +167,7 @@ void printInterCodes(char* name) {
         if (curr->kind != NULL_IR)
             fputs("\n", fp);
         fflush(fp);
+        // iter
         curr = curr->next;
     }
     fclose(fp);
@@ -319,6 +320,10 @@ InterCode getNullInterCode() {
 }
 
 // 优化加法
+// *** todo ***
+/*
+You need to finish Plus operation. You can refer to other subtraction and similar operations
+*/
 InterCode optimizePLUSIR(Operand dest, Operand src1, Operand src2) {
     if (src1->kind == CONSTANT_OP && src2->kind == CONSTANT_OP) {
         operandCpy(dest, getValue(src1->value + src2->value));
@@ -366,6 +371,9 @@ InterCode optimizeSUBIR(Operand dest, Operand src1, Operand src2) {
 }
 
 // 优化乘法
+/*
+You need to finish Mul operation. You can refer to other Div and similar operations
+*/
 InterCode optimizeMULIR(Operand dest, Operand src1, Operand src2) {
     if (src1->kind == CONSTANT_OP && src2->kind == CONSTANT_OP) {
         operandCpy(dest, getValue(src1->value * src2->value));
@@ -451,6 +459,12 @@ InterCode translateExp(Node* root, Operand place) {
     // 赋值表达式
     if (root->childNum == 3 && strcmp(root->children[1]->name, "ASSIGNOP") == 0) {
         // 单个变量作为左值
+        // *** todo ***
+        /*
+        You need to finish expression translation if the exp is just one variable
+        You need to add a temporary variable, 
+        then assign the expression to the temporary variable, and finally assign the temporary variable.
+        */
         if (root->children[0]->childNum == 1 && 
             strcmp(root->children[0]->children[0]->name, "ID") == 0) {
             Entry sym = findSymbolAll(root->children[0]->children[0]->strVal);
@@ -578,6 +592,11 @@ InterCode translateExp(Node* root, Operand place) {
         return code1;
     }
     // 条件表达式
+    // *** todo ***
+    /*
+    You need to finish expression translation if the exp is an conditional expression
+    "You need to make appropriate use of the translateCond function.
+    */
     else if (root->childNum >= 2 && (
              strcmp(root->children[0]->name, "NOT") == 0 ||
              strcmp(root->children[1]->name, "RELOP") == 0 ||
@@ -908,6 +927,12 @@ InterCode translateStmt(Node* root) {
 }
 
 // 条件表达式的翻译模式
+// *** todo ***
+/*
+You need to translate conditional expressions. 
+You can refer to the lab manual and textbooks. 
+Pay attention to how to implement short-circuit translation.
+*/
 InterCode translateCond(Node* root, Operand labelTrue, Operand labelFalse) {
     if (root->childNum >= 2 && strcmp(root->children[1]->name, "RELOP") == 0) {
         Operand tmp1 = newTemp();

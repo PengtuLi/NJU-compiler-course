@@ -1,5 +1,6 @@
 #include "objectcode.h"
 
+// the intercodes got
 extern InterCode interCodes;
 
 RegDes regs[32];    // 寄存器描述符数组
@@ -246,10 +247,8 @@ void updateInterval(RegDes reg) {
         regs[i]->interval++;
     reg->interval = 0;
 }
-/*
-* 为变量描述符分配寄存器, load用于指示是否需要装载寄存器，
-* 形如 x = y op z 的表达式中，为x分配寄存器就不需要装载，而为y和z分配时都需要
-*/
+
+// 为变量描述符分配寄存器, load用于指示是否需要装载寄存器，形如 x = y op z 的表达式中，为x分配寄存器就不需要装载，而为y和z分配时都需要
 int allocateReg(VarDes var, FILE* fp, int load) {
     // 查找是否有空闲寄存器
     int i = 8;
@@ -258,7 +257,18 @@ int allocateReg(VarDes var, FILE* fp, int load) {
             break;
     // 存在空闲寄存器
     if (i >= 8 && i < 26) {
-        // TODO
+        regs[i]->var = var;
+        updateInterval(regs[i]);
+        // var->regNo = i;
+        if (load == 1) {
+            // 常量装载到寄存器中
+            if (var->op->kind == CONSTANT_OP)
+                fprintf(fp, "  li %s, %d\n", regs[i]->name, var->op->value);
+            // 将栈中存储的变量的值装载到寄存器中
+            else if (var->op->kind == VARIABLE_OP || var->op->kind == TEMP_VAR_OP)
+                fprintf(fp, "  lw %s, %d($fp)\n", regs[i]->name, -var->offset);
+        }
+        return i;
     }
     // 不存在空闲寄存器
     else if (i == 26) {
@@ -352,7 +362,11 @@ int handleOp(Operand op, FILE* fp, int load) {
         return reg;
     }
     else if (op->kind == GET_ADDR_OP) {
-        // TODO
+        int reg = getReg(op->opr, fp, load);
+        FrameDes frame = findCurrFrame();
+        VarDes var = createVarDes(op->opr, frame);
+        fprintf(fp, "  addi %s, $fp, %d\n", regs[reg]->name, -var->offset);
+        return reg;
     }
 }
 
@@ -368,7 +382,7 @@ void printObjectCodes(char* name) {
     initRegs();
     initFrames();
     initObjectCode(fp);
-    // \
+    // 将中间代码翻译成目标代码并输入到文件
     InterCode curr = interCodes;
     int flag = 1;
     while (flag == 1 || curr != interCodes) {
@@ -413,7 +427,22 @@ void printObjectCodes(char* name) {
                 break;
             }
             case ASSIGN_IR: {
-                // TODO
+                // 左侧操作数有三种可能的类型：variable_op, temp_var_op, get_val_op
+                Operand left = curr->ops[0];
+                // 右侧操作数有五种可能的类型：variable_op, temp_var_op, constant_op, get_addr_op, get_val_op
+                Operand right = curr->ops[1];
+                // 分类讨论
+                int regRight = handleOp(right, fp, 1);
+                if (left->kind == VARIABLE_OP || left->kind == TEMP_VAR_OP) {
+                    int regLeft = getReg(left, fp, 0);
+                    fprintf(fp, "  move %s, %s\n", regs[regLeft]->name, regs[regRight]->name);
+                    spillReg(regs[regLeft], fp);
+                }
+                else if (left->kind == GET_VAL_OP) {
+                    int regLeft = getReg(left->opr, fp, 1);
+                    fprintf(fp, "  sw %s, 0(%s)\n", regs[regRight]->name, regs[regLeft]->name);
+                }
+                break;
             }
             case PLUS_IR: {
                 Operand left = curr->ops[0];
@@ -435,7 +464,23 @@ void printObjectCodes(char* name) {
                 break;
             }
             case SUB_IR: {
-                // TODO
+                Operand left = curr->ops[0];
+                Operand right1 = curr->ops[1];
+                Operand right2 = curr->ops[2];
+                int regRight1 = handleOp(right1, fp, 1);
+                int regRight2 = handleOp(right2, fp, 1);
+                if (left->kind == VARIABLE_OP || left->kind == TEMP_VAR_OP) {
+                    int regLeft = getReg(left, fp, 0);
+                    fprintf(fp, "  sub %s, %s, %s\n", regs[regLeft]->name, regs[regRight1]->name, regs[regRight2]->name);
+                    spillReg(regs[regLeft], fp);
+                }
+                else if (left->kind == GET_VAL_OP) {
+                    int regLeft1 = getReg(left->opr, fp, 0);
+                    fprintf(fp, "  sub %s, %s, %s\n", regs[regLeft1]->name, regs[regRight1]->name, regs[regRight2]->name);
+                    int regLeft2 = getReg(left->opr, fp, 1);
+                    fprintf(fp, "  sw %s, 0(%s)\n", regs[regLeft1]->name, regs[regLeft2]->name);
+                }
+                break;
             }
             case MUL_IR: {
                 Operand left = curr->ops[0];
@@ -457,7 +502,25 @@ void printObjectCodes(char* name) {
                 break;
             }
             case DIV_IR: {
-                // TODO
+                Operand left = curr->ops[0];
+                Operand right1 = curr->ops[1];
+                Operand right2 = curr->ops[2];
+                int regRight1 = handleOp(right1, fp, 1);
+                int regRight2 = handleOp(right2, fp, 1);
+                if (left->kind == VARIABLE_OP || left->kind == TEMP_VAR_OP) {
+                    int regLeft = getReg(left, fp, 0);
+                    fprintf(fp, "  div %s, %s\n", regs[regRight1]->name, regs[regRight2]->name);
+                    fprintf(fp, "  mflo %s\n", regs[regLeft]->name);
+                    spillReg(regs[regLeft], fp);
+                }
+                else if (left->kind == GET_VAL_OP) {
+                    int regLeft1 = getReg(left->opr, fp, 0);
+                    fprintf(fp, "  div %s, %s\n", regs[regRight1]->name, regs[regRight2]->name);
+                    fprintf(fp, "  mflo %s\n", regs[regLeft1]->name);
+                    int regLeft2 = getReg(left->opr, fp, 1);
+                    fprintf(fp, "  sw %s, 0(%s)\n", regs[regLeft1]->name, regs[regLeft2]->name);
+                }
+                break;
             }
             case TO_MEM_IR: {
                 Operand left = curr->ops[0];

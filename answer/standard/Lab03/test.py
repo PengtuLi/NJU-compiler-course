@@ -2,7 +2,7 @@ import os;
 
 
 if __name__=='__main__':
-    test_floder = './Test'
+    test_floder = './Test-nowrong/'
     test_files = os.listdir(test_floder)
     
     # make
@@ -16,7 +16,7 @@ if __name__=='__main__':
     
     for f_name in test_files:
         all_log.append('-------start testing '+f_name+'------\n')
-        command = './Code/parser ./Test/' + f_name
+        command = './Code/parser ./Test-nowrong/' + f_name
         os.system(command + '> temp.output')
         f = open('./temp.output','r')
         all_log.extend(f.readlines())
